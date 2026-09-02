@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vine Runner</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="app-shell">
+    <section class="intro-panel" id="welcomeScreen">
+      <div class="brand-lockup"><span class="brand-mark">✦</span><span>VINE RUNNER</span></div>
+      <div class="intro-copy">
+        <p class="eyebrow">A tiny jungle arcade</p>
+        <h1>Stay hungry.<br><em>Stay moving.</em></h1>
+        <p class="lede">Guide your vine through changing wilds, collect the glowfruit, and make your longest run yet.</p>
+      </div>
+      <div class="mode-picker">
+        <div class="section-heading"><span>Choose your trail</span><span class="rule"></span><span>01 / 03</span></div>
+        <div class="mode-grid">
+          <button class="mode-card active" data-mode="garden"><span class="mode-number">01</span><strong>Fern Gully</strong><small>Wrap around the edges</small><span class="mode-icon">✺</span></button>
+          <button class="mode-card" data-mode="island"><span class="mode-number">02</span><strong>Coral Key</strong><small>Mind the moving coconuts</small><span class="mode-icon">◒</span></button>
+          <button class="mode-card" data-mode="storm"><span class="mode-number">03</span><strong>Thunder Mesa</strong><small>Walls are waiting</small><span class="mode-icon">ϟ</span></button>
+        </div>
+      </div>
+      <div class="intro-footer"><span>ARROW KEYS / WASD TO MOVE</span><span>LOCAL BEST <b id="welcomeBest">0000</b></span></div>
+    </section>
+
+    <section class="game-panel hidden" id="gameScreen">
+      <header class="game-header">
+        <button class="text-button" id="backBtn" type="button">← Trails</button>
+        <div class="game-title"><span class="brand-mark">✦</span><strong>VINE RUNNER</strong></div>
+        <button class="icon-button" id="soundBtn" type="button" aria-label="Toggle sound">♫</button>
+      </header>
+      <div class="score-strip">
+        <div><span>TRAIL</span><strong id="trailLabel">Fern Gully</strong></div>
+        <div><span>SCORE</span><strong id="scoreLabel">0000</strong></div>
+        <div><span>BEST</span><strong id="bestLabel">0000</strong></div>
+        <div><span>TIME</span><strong id="timeLabel">00:00</strong></div>
+      </div>
+      <div class="board-wrap">
+        <canvas id="gameCanvas" width="600" height="600" aria-label="Snake game board"></canvas>
+        <div class="game-overlay hidden" id="gameOverlay"><p id="overlayKicker">RUN COMPLETE</p><h2 id="overlayTitle">Nice run.</h2><button class="primary-button" id="overlayBtn" type="button">Run it back</button></div>
+      </div>
+      <div class="game-controls"><button class="secondary-button" id="pauseBtn" type="button">Pause <span>SPACE</span></button><span class="hint">Eat the fruit. Don't bite your tail.</span><button class="secondary-button" id="restartBtn" type="button">Restart <span>R</span></button></div>
+      <div class="touch-controls" aria-label="Touch controls"><button data-dir="up">↑</button><div><button data-dir="left">←</button><button data-dir="down">↓</button><button data-dir="right">→</button></div></div>
+    </section>
+  </main>
+  <script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const grid = 24;
+    const modes = {
+      garden: { name: 'Fern Gully', speed: 135, wrap: true, colors: ['#d6efc6', '#8acb8d', '#356b4b'], fruit: '#f05f67', hazard: '#588d56' },
+      island: { name: 'Coral Key', speed: 105, wrap: true, colors: ['#c9eff0', '#61b8b7', '#236b73'], fruit: '#ffba57', hazard: '#e88367' },
+      storm: { name: 'Thunder Mesa', speed: 82, wrap: false, colors: ['#d6d7df', '#737b91', '#353c56'], fruit: '#f4e36e', hazard: '#4a5270' }
+    };
+    let mode = 'garden', snake, fruit, hazards = [], direction, queued, score, level, elapsed, timer, tickTimer, paused, running, soundOn = true;
+    let best = Number(localStorage.getItem('vineRunnerBest') || 0);
+    const $ = (id) => document.getElementById(id);
+    $('welcomeBest').textContent = String(best).padStart(4, '0');
+
+    function resetGame() {
+      snake = [{x: 12, y: 13}, {x: 11, y: 13}, {x: 10, y: 13}, {x: 9, y: 13}];
+      direction = {x: 1, y: 0}; queued = {...direction}; score = 0; level = 1; elapsed = 0; paused = false; running = true;
+      buildHazards();
+      placeFruit(); updateLabels(); $('gameOverlay').classList.add('hidden'); $('pauseBtn').innerHTML = 'Pause <span>SPACE</span>';
+      clearInterval(tickTimer); clearInterval(timer); tickTimer = setInterval(step, modes[mode].speed); timer = setInterval(() => { if (!paused) { elapsed++; updateLabels(); } }, 1000); draw();
+    }
+    function placeFruit() { do { fruit = {x: Math.floor(Math.random() * grid), y: Math.floor(Math.random() * grid)}; } while (snake.some(part => part.x === fruit.x && part.y === fruit.y) || hazards.some(hazard => hazard.x === fruit.x && hazard.y === fruit.y)); }
+    function buildHazards() {
+      const spots = mode === 'garden' ? [{x:5,y:6},{x:18,y:6},{x:5,y:18},{x:18,y:18}] : mode === 'island' ? [{x:4,y:7,dx:1},{x:19,y:16,dx:-1},{x:12,y:5,dx:1}] : [{x:6,y:7,dx:1},{x:17,y:16,dx:-1},{x:12,y:5,dx:1},{x:12,y:19,dx:-1}];
+      hazards = spots.slice(0, 2 + level).map(hazard => ({...hazard, phase: Math.random() * 6}));
+    }
+    function moveHazards() {
+      if (mode === 'garden') return;
+      hazards.forEach(hazard => { hazard.x += hazard.dx; hazard.phase += .3; if (hazard.x < 2 || hazard.x >= grid - 2) hazard.dx *= -1; });
+    }
+    function updateLabels() { $('trailLabel').textContent = `${modes[mode].name} / LVL ${level}`; $('scoreLabel').textContent = String(score).padStart(4, '0'); $('bestLabel').textContent = String(best).padStart(4, '0'); $('timeLabel').textContent = `${String(Math.floor(elapsed / 60)).padStart(2, '0')}:${String(elapsed % 60).padStart(2, '0')}`; }
+    function step() {
+      if (paused || !running) return; direction = queued; moveHazards();
+      const head = {x: snake[0].x + direction.x, y: snake[0].y + direction.y};
+      if (modes[mode].wrap) { head.x = (head.x + grid) % grid; head.y = (head.y + grid) % grid; }
+      if (head.x < 0 || head.x >= grid || head.y < 0 || head.y >= grid || snake.some(part => part.x === head.x && part.y === head.y) || hazards.some(hazard => hazard.x === head.x && hazard.y === head.y)) return endGame();
+      snake.unshift(head);
+      if (head.x === fruit.x && head.y === fruit.y) { score += 10; const nextLevel = Math.floor(score / 50) + 1; if (nextLevel !== level) { level = nextLevel; buildHazards(); } if (score > best) { best = score; localStorage.setItem('vineRunnerBest', best); $('welcomeBest').textContent = String(best).padStart(4, '0'); } placeFruit(); updateLabels(); clearInterval(tickTimer); tickTimer = setInterval(step, Math.max(48, modes[mode].speed - (level - 1) * 8)); beep(520); } else snake.pop();
+      draw();
+    }
+    function endGame() { running = false; clearInterval(tickTimer); clearInterval(timer); $('overlayKicker').textContent = 'RUN COMPLETE'; $('overlayTitle').textContent = score > 0 ? `${score} points.` : 'The wild wins.'; $('overlayBtn').textContent = 'Run it back'; $('gameOverlay').classList.remove('hidden'); draw(); beep(150); }
+    function draw() {
+      const tile = canvas.width / grid, palette = modes[mode].colors;
+      ctx.fillStyle = palette[0]; ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.strokeStyle = mode === 'storm' ? 'rgba(53,60,86,.09)' : 'rgba(35,107,75,.09)'; ctx.lineWidth = 1;
+      for (let i = 0; i <= grid; i++) { ctx.beginPath(); ctx.moveTo(i * tile, 0); ctx.lineTo(i * tile, canvas.height); ctx.stroke(); ctx.beginPath(); ctx.moveTo(0, i * tile); ctx.lineTo(canvas.width, i * tile); ctx.stroke(); }
+      ctx.fillStyle = mode === 'garden' ? 'rgba(255,255,255,.22)' : mode === 'island' ? 'rgba(255,255,255,.2)' : 'rgba(255,255,255,.12)';
+      for (let i = 0; i < 18; i++) { const x = (i * 97) % canvas.width, y = (i * 151) % canvas.height; ctx.beginPath(); mode === 'storm' ? (ctx.moveTo(x, y), ctx.lineTo(x + 16, y + 16), ctx.lineTo(x + 8, y + 20)) : ctx.arc(x, y, mode === 'island' ? 12 : 5, 0, Math.PI * 2); ctx.fill(); }
+      ctx.fillStyle = modes[mode].fruit; ctx.beginPath(); ctx.arc(fruit.x * tile + tile / 2, fruit.y * tile + tile / 2, tile * .28, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = 'rgba(255,255,255,.45)'; ctx.beginPath(); ctx.arc(fruit.x * tile + tile * .42, fruit.y * tile + tile * .4, tile * .08, 0, Math.PI * 2); ctx.fill();
+      hazards.forEach(hazard => { const x = hazard.x * tile + tile / 2, y = hazard.y * tile + tile / 2 + Math.sin(hazard.phase) * 2; ctx.fillStyle = modes[mode].hazard; ctx.beginPath(); if (mode === 'storm') { ctx.moveTo(x, y - 10); ctx.lineTo(x + 8, y); ctx.lineTo(x, y + 10); ctx.lineTo(x - 8, y); } else { ctx.arc(x, y, tile * .34, 0, Math.PI * 2); } ctx.fill(); ctx.strokeStyle = 'rgba(255,255,255,.45)'; ctx.stroke(); });
+      snake.slice().reverse().forEach((part, reverseIndex) => { const index = snake.length - 1 - reverseIndex, x = part.x * tile, y = part.y * tile; ctx.fillStyle = index === 0 ? '#efff96' : palette[2]; ctx.beginPath(); ctx.roundRect(x + 2, y + 2, tile - 4, tile - 4, tile * .28); ctx.fill(); });
+      const head = snake[0], hx = head.x * tile + tile / 2, hy = head.y * tile + tile / 2; ctx.fillStyle = '#172b26'; [-1, 1].forEach(offset => { const ex = hx + direction.x * 4 - direction.y * offset * 4, ey = hy + direction.y * 4 + direction.x * offset * 4; ctx.beginPath(); ctx.arc(ex, ey, 2, 0, Math.PI * 2); ctx.fill(); });
+    }
+    function chooseDirection(next) { if (next.x + direction.x !== 0 || next.y + direction.y !== 0) queued = next; }
+    function togglePause() { if (!running) return; paused = !paused; $('pauseBtn').innerHTML = paused ? 'Resume <span>SPACE</span>' : 'Pause <span>SPACE</span>'; draw(); }
+    function beep(freq) { if (!soundOn) return; const audio = new (window.AudioContext || window.webkitAudioContext)(), oscillator = audio.createOscillator(); oscillator.frequency.value = freq; oscillator.connect(audio.destination); oscillator.start(); oscillator.stop(audio.currentTime + .06); }
+    document.querySelectorAll('.mode-card').forEach(card => card.addEventListener('click', () => { mode = card.dataset.mode; document.querySelectorAll('.mode-card').forEach(item => item.classList.remove('active')); card.classList.add('active'); $('welcomeScreen').classList.add('hidden'); $('gameScreen').classList.remove('hidden'); resetGame(); }));
+    $('backBtn').addEventListener('click', () => { clearInterval(tickTimer); clearInterval(timer); $('gameScreen').classList.add('hidden'); $('welcomeScreen').classList.remove('hidden'); });
+    $('pauseBtn').addEventListener('click', togglePause); $('restartBtn').addEventListener('click', resetGame); $('overlayBtn').addEventListener('click', resetGame); $('soundBtn').addEventListener('click', () => { soundOn = !soundOn; $('soundBtn').textContent = soundOn ? '♫' : '×'; });
+    const directions = {ArrowUp:{x:0,y:-1}, w:{x:0,y:-1}, ArrowDown:{x:0,y:1}, s:{x:0,y:1}, ArrowLeft:{x:-1,y:0}, a:{x:-1,y:0}, ArrowRight:{x:1,y:0}, d:{x:1,y:0}};
+    document.addEventListener('keydown', event => { if (event.key === ' ' || event.key.toLowerCase() === 'p') { event.preventDefault(); togglePause(); } else if (event.key.toLowerCase() === 'r') resetGame(); else if (directions[event.key]) { event.preventDefault(); chooseDirection(directions[event.key]); } });
+    document.querySelectorAll('[data-dir]').forEach(button => button.addEventListener('click', () => chooseDirection(directions[{up:'ArrowUp',down:'ArrowDown',left:'ArrowLeft',right:'ArrowRight'}[button.dataset.dir]])));
+  </script>
+</body>
+</html>
